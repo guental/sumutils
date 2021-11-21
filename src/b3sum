@@ -1,0 +1,398 @@
+#!/bin/bash
+{
+
+function keyboard_interrupt() {
+exec 2>/dev/null
+printf -- '\n'
+exec >/dev/null
+exit 130
+}
+
+app="b3sum"
+code=0
+trap -- 'keyboard_interrupt' INT
+set +H -uo pipefail
+shopt -s -- extglob
+
+function echo() {
+printf -- '%s\n' "${@}"
+}
+
+function echoerr() {
+printf -- '%s\n' "${@}" 1>&2
+}
+
+function blake3_calc() {
+if [ -e "${1:-""}" ]; then
+	if blake3 "${1}" 2>/dev/null; then
+		return 0
+	else
+		return 1
+	fi
+else
+	return 1
+fi
+}
+
+function blake3_make() {
+local "filename" "blake3_hash"
+filename="${1}"
+blake3_hash=$( blake3_calc "${filename}" )
+case "${tag:-"0"}" in
+	1)
+		echo "BLAKE3 (${argname}) = ${blake3_hash}"
+	;;
+	*)
+		echo "${blake3_hash}  ${argname}"
+	;;
+esac
+}
+
+function whirlpool_check_type() {
+local "data" "mark" "mark_num" "hash_num"
+data="${1:-""}"
+file="${data:-""}"
+file="${file/%????????????????????????????????????????????????????????????????????}"
+file="${file:8}"
+mark="${data/%????????????????????????????????????????????????????????????????}"
+mark_num="${#mark}"
+mark_num=$(( mark_num - 4 ))
+mark="${mark:mark_num}"
+unset -- "mark_num"
+mark="${data:0:8}${mark}"
+hash_num="${data/%????????????????????????????????????????????????????????????????}"
+hash_num="${#hash_num}"
+hash="${data:hash_num}"
+unset -- "hash_num"
+
+case "${file}" in
+	"-")
+		sum=1
+		return 1
+	;;
+esac
+case "${mark}" in
+	"BLAKE3 () = "|"Blake3 () = "|"blake3 () = ")
+		sum=0
+		return 0
+	;;
+esac
+
+mark="${1:-""}"
+mark="${mark:64:2}"
+file="${1:-""}"
+file="${file:66}"
+hash="${1}"
+hash="${hash:0:64}"
+
+
+case "${file}" in
+	"-")
+		sum=1
+		return 1
+	;;
+esac
+case "${mark}" in
+	"  "|" *")
+		sum=0
+		return 0
+	;;
+	*)
+		sum=1
+		return 1
+	;;
+esac
+
+}
+
+function blake3_check_act() {
+local "old" "arg" "new"
+old="${1}"
+arg="${2}"
+if [[ -d "${arg}" ]]; then
+	echoerr "${app}: ${arg}: Is a directory"
+	echo "${arg}: FAILED open or read"
+	all=0
+	warnopen=1
+	warnfail=0
+	return 1
+elif [[ -e "${arg}" ]]; then
+	if ! [[ -r "${arg}" ]]; then
+		echoerr "${app}: ${arg}: Permission denied"
+		echo "${arg}: FAILED open or read"
+		all=0
+		warnopen=1
+		warnfail=0
+		return 1
+	fi
+	new=$( blake3_calc "${arg}" )
+	case "${old}" in
+		"${new}")
+			echo "${arg}: OK"
+			all=0
+			warnopen=0
+			warnfail=0
+			return 0
+		;;
+		*)
+			echo "${arg}: FAILED"
+			all=0
+			warnopen=0
+			warnfail=1
+			return 1
+		;;
+	esac
+else
+	case "${ignore_missing:-"0"}" in
+		1)
+			all=0
+			warnopen=0
+			warnfail=0
+			return 0
+		;;
+		0)
+			echoerr "${app}: ${arg}: No such file or directory"
+			echo "${arg}: FAILED open or read"
+			all=0
+			warnopen=1
+			warnfail=0
+			return 1
+		;;
+	esac
+fi
+}
+
+function blake3_check() {
+local "funccode" "warn" "warn_file" "warn_check" "data" "array" "sum" "hash" "file" "all" "warnopen" "warnfail"
+funccode=0
+warn=0
+warn_file=0
+warn_check=0
+while read -r -- "data"; do
+	case "${data}" in
+		"${data//[[:cntrl:]]}")
+			:
+		;;
+		*)
+			return 1
+		;;
+	esac
+	whirlpool_check_type "${data}"
+	case "${sum:-"1"}" in
+		0)
+			blake3_check_act "${hash}" "${file}"
+			case "${warnopen:-"0"}" in
+				1)
+					((warn_file++))
+				;;
+			esac
+			case "${warnfail:-"0"}" in
+				1)
+					((warn_check++))
+				;;
+			esac
+			case "${all:-"1"}" in
+				0)
+					continue
+				;;
+				*)
+					funccode=1
+					continue
+				;;
+			esac
+		;;
+		*)
+			((warn++))
+			continue
+		;;
+	esac
+done < "${1}"
+case "${warn:-"0"}" in
+	0)
+		:
+	;;
+	1)
+		echoerr "${app}: WARNING: 1 line is improperly formatted"
+	;;
+	*)
+		echoerr "${app}: WARNING: ${warn} lines are improperly formatted"
+	;;
+esac
+case "${warn_file:-"0"}" in
+	0)
+		:
+	;;
+	1)
+		echoerr "${app}: WARNING: 1 listed file could not be read"
+	;;
+	*)
+		echoerr "${app}: WARNING: ${warn} listed files could not be read"
+	;;
+esac
+case "${warn_check:-"0"}" in
+	0)
+		:
+	;;
+	1)
+		echoerr "${app}: WARNING: 1 computed checksum did NOT match"
+	;;
+	*)
+		echoerr "${app}: WARNING: ${warn} computed checksums did NOT match"
+	;;
+esac
+case "${funccode}" in
+	0)
+		return 0
+	;;
+	*)
+		return 1
+	;;
+esac
+}
+
+function show_help() {
+local "text"
+text="usage: b3sum [-h] [-c | --tag] [--ignore-missing] [FILE [FILE ...]]
+
+Print or check BLAKE3 (256-bit) checksums.
+
+positional arguments:
+  FILE
+
+optional arguments:
+  -h, --help        show this help message and exit
+  -c, --check       read BLAKE3 sums from the FILEs and check them
+  --tag             create a BSD-style checksum
+  --ignore-missing  don't fail or report status for missing files"
+case "${1:-"0"}" in
+	1)
+		echo "${text}" 1>&2
+		exit 1
+	;;
+	*)
+		echo "${text}"
+	;;
+esac
+}
+
+function show_errargs() {
+local "one" "two"
+one="${1:-"-c/--check"}"
+two="${2:-"--tag"}"
+echo "usage: b3sum [-h] [-c | --tag] [--ignore-missing] [FILE [FILE ...]]
+b3sum: error: argument ${one}: not allowed with argument ${two}" >&2
+exit 2
+}
+
+function main() {
+local "OPT" "OPTARG" "OPTERR" "OPTIND" "QUIET" "args" "nargs"
+OPTIND=1
+OPTERR=0
+args=()
+nargs=0
+while getopts "hc-:" OPT; do
+	case "${OPT}" in
+		h)
+			show_help
+		;;
+		c)
+			check=1
+			case "${tag:-"0"}" in
+				1)
+					show_errargs "-c/--check" "--tag"
+				;;
+			esac
+		;;
+		-*)
+			case "${OPTARG}" in
+				help)
+					show_help
+				;;
+				check)
+					check=1
+					case "${tag:-"0"}" in
+						1)
+							show_errargs "-c/--check" "--tag"
+						;;
+					esac
+				;;
+				tag)
+					tag=1
+					case "${check:-"0"}" in
+						1)
+							show_errargs "--tag" "-c/--check"
+						;;
+					esac
+				;;
+				ignore-missing)
+					ignore_missing=1
+				;;
+				*)
+					show_help 1 1>&2
+				;;
+			esac
+		;;
+		*)
+			show_help 1 1>&2
+		;;
+	esac
+done
+shift $(( OPTIND - 1 ))
+OPTIND=1
+OPTERR=1
+args=( "${@}" )
+nargs="${#}"
+
+if ! type -- blake3 >/dev/null 2>&1; then
+	printf -- '%s\n' "${app}: please install: blake3"
+fi
+
+stdin=0
+case "${nargs}" in
+	0)
+		args=( "/dev/stdin" )
+		stdin=1
+	;;
+esac
+
+for arg in "${args[@]}"; do
+	case "${stdin}" in
+		1)
+			argname="-"
+		;;
+		*)
+			argname="${arg}"
+		;;
+	esac
+	if [[ -d "${arg}" ]]; then
+		echoerr "${app}: ${argname}: Is a directory"
+		code=1
+	elif [[ -e "${arg}" ]]; then
+		if [[ -r "${arg}" ]]; then
+			filepath="${arg}"
+		else
+			echoerr "${app}: ${argname}: Permission denied"
+			code=1
+			continue
+		fi
+		case "${check:-"0"}" in
+			0)
+				blake3_make "${filepath}"
+			;;
+			*)
+				if ! blake3_check "${filepath}" "${arg}"; then
+					code=1
+				fi
+			;;
+		esac
+	else
+		echoerr "${app}: ${argname}: No such file or directory"
+		code=1
+	fi
+done
+exit "${code:-"0"}"
+}
+
+main "${@}"
+exit 1
+}

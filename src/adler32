@@ -1,0 +1,59 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*- vim: et ts=4 sw=4
+# adler32: compute ADLER-32 checksums for the given files
+#
+# Copyright (C) 2021 Guental, All Rights Reserved
+
+from __future__ import print_function
+import sys
+sys.tracebacklimit = 0
+import os, zlib
+from io import DEFAULT_BUFFER_SIZE as DEFAULT
+
+APP = "adler32"
+CODE = 0
+
+def adler32_calc(FILENAME):
+	with open(FILENAME, 'rb') as openfile:
+		while True:
+			DATA = openfile.read(DEFAULT)
+			if not DATA:
+				break
+			ADLER = zlib.adler32(DATA)
+
+		return ADLER
+
+if __name__ == '__main__':
+	try:
+		if len(sys.argv) < 2:
+			sys.exit(CODE)
+		else:
+			for ARG in sys.argv[1:]:
+				if os.path.isdir(ARG):
+					print(APP + ":", ARG + ": Is a directory", file=sys.stderr)
+					CODE = 1
+				elif os.path.exists(ARG):
+					try:
+						with open(ARG) as F:
+							FILEPATH = ARG
+					except IOError:
+						print(APP + ":", ARG + ": Permission denied", file=sys.stderr)
+						CODE = 1
+						continue
+					ADLER32_HASH = adler32_calc(FILEPATH)
+					END_HASH = '%08X' % (ADLER32_HASH & 0xffffffff)
+					if len(sys.argv) == 2:
+						print(END_HASH.lower())
+					else:
+						print(END_HASH.lower() + "\t" + ARG)
+				else:
+					print (APP + ":", ARG + ": No such file or directory", file=sys.stderr)
+					CODE = 1
+	
+	except KeyboardInterrupt:
+		sys.stderr.close()
+		print ('')
+		sys.stdout.close()
+		sys.exit(130)
+
+sys.exit(CODE)

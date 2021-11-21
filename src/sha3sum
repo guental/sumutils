@@ -1,0 +1,279 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*- vim: et ts=4 sw=4
+# sha3sum: print or check SHA-3 checksums
+#
+# Copyright (C) 2021 Guental, All Rights Reserved
+
+from __future__ import print_function
+import sys
+sys.tracebacklimit = 0
+import os, argparse, hashlib, re
+from io import DEFAULT_BUFFER_SIZE as DEFAULT
+
+sys.tracebacklimit = 0
+APP = "sha3sum"
+CODE = 0
+DEFAULT_LINE = DEFAULT * 8
+
+def shake256_calc(FILENAME, TYPE, LENGTH):
+	TYPENAME = "SHA3-"
+	if TYPE == 224:
+		hashsum = hashlib.sha3_224()
+	elif TYPE == 256:
+		hashsum = hashlib.sha3_256()
+	elif TYPE == 384:
+		hashsum = hashlib.sha3_384()
+	elif TYPE == 256000:
+		TYPENAME = "SHAKE"
+		hashsum = hashlib.shake_256()
+	elif TYPE == 128000:
+		TYPENAME = "SHAKE"
+		hashsum = hashlib.shake_128()
+	else:
+		hashsum = hashlib.sha3_512()
+
+	with open(FILENAME, 'rb') as openfile:
+		while True:
+			DATA = openfile.read(DEFAULT)
+			if not DATA:
+				break
+			hashsum.update(DATA)
+
+		if TYPENAME == "SHA3-":
+			SHAKE256 = hashsum.hexdigest()
+		else:
+			SHAKE256 = hashsum.hexdigest(LENGTH)
+		return TYPENAME, SHAKE256
+
+def shake256_make(FILENAME, TYPE, LENGTH):
+	TYPENAME, SHAKE256_HASH = shake256_calc(FILEPATH, TYPE, LENGTH)
+	if args.tag == True:
+		if str(args.algorithm)[:3] == "0":
+			TYPE = "512"
+		else:
+			TYPE = str(args.algorithm)[:3]
+		print( TYPENAME + TYPE + " (" + ARGNAME + ") =", SHAKE256_HASH)
+	else:
+		print(SHAKE256_HASH + '  ' + ARGNAME)
+
+def shake256_check_type(DATA, TYPE):
+	DATA = DATA[:-1]
+	FILE = DATA[10:]
+	MARK = DATA[:10]
+	if re.match(".*\) = .*", DATA):
+		FILE = FILE.split(") = ", 1)[0]
+		HASH = DATA.split(") = ", 1)[1]
+		LENGTH = int(len(HASH) / 2)
+	if FILE == '-':
+		return False, HASH, FILE, TYPE, LENGTH
+	elif MARK  == "SHA3-224 (":
+		TYPE = 224
+		return True, HASH, FILE, TYPE, LENGTH
+	elif MARK  == "SHA3-256 (":
+		TYPE = 256
+		return True, HASH, FILE, TYPE, LENGTH
+	elif MARK  == "SHA3-384 (":
+		TYPE = 384
+		return True, HASH, FILE, TYPE, LENGTH
+	elif MARK  == "SHAKE256 (":
+		TYPE = 256000
+		return True, HASH, FILE, TYPE, LENGTH
+	elif MARK  == "SHAKE128 (":
+		TYPE = 128000
+		return True, HASH, FILE, TYPE, LENGTH
+	elif MARK  == "SHA3-512 (":
+		TYPE = 512
+		return True, HASH, FILE, TYPE, LENGTH
+
+	else:
+		FILE = DATA.split("  ", 1)[1]
+		HASH = DATA.split("  ", 1)[0]
+		MARK = DATA[len(HASH):]
+		MARK = MARK[:2]
+		LENGTH = int(len(HASH) / 2)
+
+		if str(args.algorithm) == "0":
+			if LENGTH == 28:
+				TYPE = 224
+			elif LENGTH == 32:
+				TYPE = 256
+			elif LENGTH == 48:
+				TYPE = 384
+			elif LENGTH == 64:
+				TYPE = 512
+			elif LENGTH == 168:
+				TYPE = 128000
+			elif LENGTH == 136:
+				TYPE = 256000
+			else:
+				TYPE = 256000
+				return False, HASH, FILE, TYPE, LENGTH
+
+		if FILE == '-':
+			return False, HASH, FILE, TYPE, LENGTH
+		if MARK == '  ':
+			return True, HASH, FILE, TYPE, LENGTH
+		elif MARK == ' *':
+			return True, HASH, FILE, TYPE, LENGTH
+		else:
+			return False, HASH, FILE, TYPE, LENGTH
+
+def shake256_check_act(OLD, ARG, TYPE, LENGTH):
+	if os.path.isdir(ARG):
+		print(APP + ":", ARG + ": Is a directory", file=sys.stderr)
+		print (ARG + ": FAILED open or read")
+		return False, False, True
+	elif os.path.exists(ARG):
+		try:
+			with open(ARG) as F:
+				FILEPATH = ARG
+		except IOError:
+			print(APP + ":", ARG + ": Permission denied", file=sys.stderr)
+			print (ARG + ": FAILED open or read")
+			return False, False, True
+		TYPENAME, NEW = shake256_calc(FILEPATH, TYPE, LENGTH)
+		if OLD == NEW:
+			print(ARG + ": OK")
+			return True, True, True
+		else:
+			print(ARG + ": FAILED")
+			return False, True, False
+	else:
+		if args.ignore_missing == True:
+			return True, True, True
+		else:
+			print (APP + ":", ARG + ": No such file or directory", file=sys.stderr)
+			print (ARG + ": FAILED open or read")
+			return False, False, True
+
+def shake256_check(FILENAME, NAME, TYPE):
+	FUNCCODE = 0
+	WARN = 0
+	WARN_FILE = 0
+	WARN_CHECK = 0
+	try:
+		with open(FILENAME, 'r') as openfile:
+			while True:
+				try:
+					DATA = openfile.readline(DEFAULT_LINE)
+					if not DATA:
+						break
+					
+					SUM, HASH, FILE, TYPE, LENGTH = shake256_check_type(DATA, TYPE)
+					if SUM == True:
+						ALL, WARNOPEN, WARNFAIL = shake256_check_act(HASH, FILE, TYPE, LENGTH)
+						
+						if WARNOPEN == False:
+							WARN_FILE = WARN_FILE + 1
+						if WARNFAIL == False:
+							WARN_CHECK = WARN_CHECK + 1
+
+						if ALL == True:
+							continue
+						else:
+							FUNCCODE = 1
+							continue
+					else:
+						WARN = WARN + 1
+						continue
+
+				except IndexError:
+					continue
+
+		if WARN > 1:
+			print(APP + ": WARNING: " + str(WARN) + " lines are improperly formatted", file=sys.stderr)
+		elif WARN == 1:
+			print(APP + ": WARNING: 1 line is improperly formatted", file=sys.stderr)
+		if WARN_FILE > 1:
+			print(APP + ": WARNING: " + str(WARN_FILE) + " listed files could not be read", file=sys.stderr)
+		elif WARN_FILE == 1:
+			print(APP + ": WARNING: 1 listed file could not be read", file=sys.stderr)
+		if WARN_CHECK > 1:
+			print(APP + ": WARNING: " + str(WARN_CHECK) + " computed checksums did NOT match", file=sys.stderr)
+		elif WARN_CHECK == 1:
+			print(APP + ": WARNING: 1 computed checksum did NOT match", file=sys.stderr)
+					
+		if FUNCCODE == 0:
+			return True
+		else:
+			return False
+
+	except UnicodeDecodeError:
+		return False
+
+if __name__ == '__main__':
+	try:
+		parser = argparse.ArgumentParser(
+				description='Print or check SHA-3 checksums.')
+		group_zero = parser.add_mutually_exclusive_group()
+		group_one = parser.add_mutually_exclusive_group()
+		group_two = parser.add_mutually_exclusive_group()
+		group_zero.add_argument('-a', '--algorithm', help='224, 256, 384, 512 (default), 128000, 256000', default=0)
+		group_one.add_argument('-c', '--check', help='read SHA-3 sums from the FILEs and check them', action="store_true", default=False)
+		group_one.add_argument('--tag', help="create a BSD-style checksum", action="store_true", default=False)
+		group_two.add_argument('-l', '--length', help='SHAKE digest length in bits', default=0)
+		group_two.add_argument('--ignore-missing', help="don't fail or report status for missing files", action="store_true", default=False)
+
+		parser.add_argument('FILE', action='store', nargs='*')
+		args = parser.parse_args()
+
+		STDIN = False
+		
+		if str(args.algorithm) == '0':
+			TYPE = 512
+			LENGTH = 64
+		elif str(args.algorithm) in ('224', '256', '384', '512'):
+			TYPE = int(args.algorithm)
+			LENGTH = int( int(args.algorithm) / 4)
+		elif str(args.algorithm) in ('128000', '256000'):
+			TYPE = int(args.algorithm)
+			LENGTH = int( int(args.algorithm[:3]) / 4)
+		else:
+			print (APP + ":", str(args.algorithm) + ": value invalid for option a (number expected)", file=sys.stderr)
+			sys.exit(1)
+		if int(args.length) % 8 == 0:
+			if not int(args.length) == 0:
+				LENGTH = int( int(args.length) / 8 )
+		else:
+			print (APP + ":", str(args.length) + ": length is not a multiple of 8", file=sys.stderr)
+			sys.exit(1)
+		if LENGTH >= 536870912:
+			print (APP + ":", str(args.length) + ": length is too large", file=sys.stderr)
+			sys.exit(1)
+
+		if len(args.FILE) == 0:
+			args.FILE = ['/dev/stdin']
+			STDIN = True
+
+		for ARG in args.FILE:
+			if STDIN == True:
+				ARGNAME = "-"
+			else:
+				ARGNAME = ARG
+			if os.path.isdir(ARG):
+				print(APP + ":", ARGNAME + ": Is a directory", file=sys.stderr)
+				CODE = 1
+			elif os.path.exists(ARG):
+				try:
+					with open(ARG) as F:
+						FILEPATH = ARG
+				except IOError:
+					print(APP + ":", ARGNAME + ": Permission denied", file=sys.stderr)
+					CODE = 1
+					continue
+				if args.check == False:
+					shake256_make(FILEPATH, TYPE, LENGTH)
+				else:
+					if not shake256_check(FILEPATH, ARG, TYPE):
+						CODE = 1
+			else:
+				print (APP + ":", ARGNAME + ": No such file or directory", file=sys.stderr)
+				CODE = 1
+	
+	except KeyboardInterrupt:
+		sys.stderr.close()
+		print ('')
+		sys.stdout.close()
+		sys.exit(130)
+
+sys.exit(CODE)
