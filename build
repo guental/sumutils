@@ -1,0 +1,319 @@
+#!/bin/bash
+{
+
+function keyboard_interrupt() {
+exec 2>/dev/null
+printf -- '\n'
+exec >/dev/null
+if [[ -d "${dir:-""}" ]]; then
+	rm -fr -- "${dir}" "${src}/crc32/crc32" "${src}/crc32/crc32.o" "${src}/blake3/blake3" &>/dev/null
+fi
+exit 130
+}
+
+if [[ -d "${0%"/"*}" ]]; then
+	if cd -- "${0%"/"*}"; then
+		src="${PWD}/src/"
+		dir="${PWD}/lib/"
+	else
+		exit 1
+	fi
+else
+	src="${PWD}/src/"
+	dir="${PWD}/lib/"
+fi
+if mkdir -p "${dir}"; then
+	if cd -- "${dir}"; then
+		:
+	else
+		exit 1
+	fi
+else
+	exit 1
+fi
+trap -- 'keyboard_interrupt' INT
+app="${0##*"/"}"
+code=0
+set +H -uo pipefail
+shopt -s -- extglob
+shopt -s -- globstar
+
+sha="\
+1ba76d6ec4483af326eb8b2070669f26969ee9872a5e52b21eda14c1718e85a2  blake3.tar.gz
+05af061c123c268e9a0ebff7f4b52073c85ebbad2c1f09358aef7c2d321e8c1c  blake.tar.gz
+e676750b7771945cc7f20af761e6b128e851ae6f6d86a380b051fcc7973cb782  bmw.tar.gz
+c7d7048630e13cadac1730e66d1637fc54a5198369a456e905529f5284ccd494  cubehash-xs.tar.gz
+4c9a95b2bd1e2d22ed8e0e890b158851e5adc8b314f76b06747f5c067d235ede  echo.tar.gz
+2cf8e5947fe6e90b5a2e8340cacc77628f2f783b65dee4a221130aaee2581a95  edonr.tar.gz
+f7695c5b0a1eb9ea7977518d461b81850246eba42ce6cef41d9daa8fa2d8cd8c  fugue.tar.gz
+3197faf6ed6469d1371673dc7bed7094d963df9b1d8f17e4e645fca794377caa  groestl.tar.gz
+505a980b082c25d3f17e307e1b4ff7765a56083da5eba7ccfd5b1335d00f6c99  hamsi.tar.gz
+c34d4529c48ff519c578d26ddd94afc305d2db3879d939e258972ad133820c6b  jh.tar.gz
+1e9c55fe84c6a6089ae467465f5e6b745f99a52dd3d2ff662502e0cfdeb95d77  keccak.tar.gz
+3a2ba38c16a8e84a124f88f57ffd34f4506ef239ead85dcc80cf976c1c177a7c  luffa.tar.gz
+dc62f20fef5371edaafaf9d32f553cc8ae62536a6d355e58ada832a2e72bfb0d  shabal.tar.gz
+587cb2899e72f754d260398ab9c1798b783a716a0a956cdb6242f2afa5e53669  shavite3.tar.gz
+ba692266f323beb37181b8746eed34adfd5d9c72f6caca708afabfc5cf43acb3  simd.tar.gz
+ba9ee7a08d854d6020e5252daa7fe0c33e16642969148cbd9ce7e6a07f3e441a  skein.tar.gz
+0d176b28b2996ef0c6f7ff684076a058575104dad0af50e1b0d2cfad9285b508  sys.tar.gz"
+
+software=(
+gray/digest-blake/archive/01513f667946e1440e3e1b2914d9b7c63e6aeb53
+# zeebo/blake3/archive/9cc48107547a838339855ef310b3f90c9a9e0aa2
+gray/digest-bmw/archive/50801328451ded16417b2110c6bf333d2558938d
+gray/digest-cubehash-xs/archive/631f40461dfa074b1020b659294cab0b470ecd59
+gray/digest-echo/archive/d9f8a835e61875478f2326f3455f62e34a60f1d7
+gray/digest-edonr/archive/bf35370e3443a10405e45cfebd56c1c989da2e2b
+gray/digest-fugue/archive/754c64189a263a75b4ef96abbb18d6d7837fe148
+gray/digest-groestl/archive/bed9bfa112a85a12a6428e03f8e1abf2c12d8e12
+gray/digest-hamsi/archive/fabf9d6a524beb6644eb99301ebf70f050e07a7e
+gray/digest-jh/archive/0dbb5a0acbe0c877803cc3f1ff43552ef3ec6146
+gray/digest-keccak/archive/1cc4e823c525ab04634b8879f7288afe25f4c432
+gray/digest-luffa/archive/79324ae5eee380e61dcb5d753af0026bd3676625
+gray/digest-shabal/archive/dda9cf5e10d04454403268ab8a965b37ef4b501a
+gray/digest-shavite3/archive/06e077184ea6848db4c4e764a20cf5cbadecfd4b
+gray/digest-simd/archive/ab54ce98da22571d791ac19a3e60a053b89c20a1
+radekz/digest-skein/archive/2f5b2e828f91457dd15d2dcf36c9bbb340b35fea
+# golang/sys/archive/cc95f250f6bc3b018920acb1f50bc5aa1f6bd725
+)
+type="tar.gz"
+software_name=( "${software[@]#*"/"}" )
+software_name=( "${software_name[@]%%"/"*}" )
+software_name=( "${software_name[@]/%/".${type}"}" )
+software_name=( "${software_name[@]/#"digest-"}" )
+software_name=( "${software_name[@]/#"zlib_"}" )
+software=( "${software[@]/#/"https://github.com/"}" )
+software=( "${software[@]/%/".${type}"}" )
+
+function pkgchk() {
+local "want" "mark" "current" "line"
+want="build-essential coreutils cmake"
+mark="Debian GNU/Linux 10 (buster)"
+current=$(
+if [[ -e "/etc/os-release" ]]; then
+	while read -r -- "line"; do
+		line="${line/#"PRETTY_NAME=\""}"
+		line="${line/%"\""}"
+		echo "${line}"
+		break
+	done < "/etc/os-release"
+else
+	echo "Unknown"
+fi
+)
+
+if ! type -- go &>/dev/null; then
+	case "${current}" in
+		"${mark}")
+			want+=" golang/buster-backports golang-doc/buster-backports golang-go/buster-backports golang-src/buster-backports"
+		;;
+		*)
+			want+=" golang golang-doc golang-go golang-src"
+		;;			
+	esac
+fi
+
+want+=" grep gzip perl tar wget"
+
+if ! [[ -e "/usr/include/zlib.h" ]]; then
+	want+=" zlib1g-dev"
+fi
+if type sha256sum gcc g++ make cmake go &>/dev/null && [[ -e "/usr/include/zlib.h" ]]; then
+	:
+else
+	echo "${app}: please install: ${want}" 1>&2
+	exit 1
+fi
+}
+
+function download_libs() {
+local "n" "url" "package" "go"
+n=0
+for url in "${software[@]}"; do
+	package="${software_name[$n]}"
+	package_dir="${url/#"https://github.com/"}"
+	package_dir="${package_dir#*"/"}"
+	package_dir="${package_dir/"/archive/"/"-"}"
+	package_dir="${package_dir/%".tar.gz"}"
+	if [[ -e "${package}" ]]; then
+		rm -f -- "${package_dir}"
+	elif [[ -e "${package_dir}" ]]; then
+		continue
+	fi
+	if ! [[ -e "${package}" ]]; then
+		if wget -O "${package}" -- "${url}" &>/dev/null; then
+			if gunzip -t -- "${package}" &>/dev/null; then
+				if grep -- "${package}$" <<< "${sha}" | sha256sum --check --ignore-missing &>/dev/null; then
+					if tar -xf "${package}" &>/dev/null; then
+						rm -f -- "${package}"
+						echo "download: ${package/%".${type}"}: OK"
+					else
+						echo "download: ${package/%".${type}"}: FAILED"
+						code=1
+					fi
+				else	
+					rm -f -- "${package}"
+					echo "download: ${package/%".${type}"}: FAILED"
+					code=1
+				fi
+			else	
+				rm -f -- "${package}"
+				echo "download: ${package/%".${type}"}: FAILED"
+				code=1
+			fi
+		else
+			rm -f -- "${package}"
+			echo "download: ${package/%".${type}"}: FAILED"
+			code=1
+		fi
+	fi
+	((n++))
+done
+# go="blake3-9cc48107547a838339855ef310b3f90c9a9e0aa2"
+# if [[ -d "${go}" ]]; then
+# 	if ! [[ -d "${HOME}/go/src/github.com/zeebo/blake3" ]]; then
+# 		if mkdir -p -- "${HOME}/go/pkg/mod/github.com/zeebo/blake3@v0.2.1"; then
+# 			rm -fr -- "${go}/avo/"
+# 			mv -- "${go}/"* "${HOME}/go/pkg/mod/github.com/zeebo/blake3@v0.2.1"
+# 		fi
+# 	fi
+# 	rm -fr -- "${go}"
+# 	for file in "${HOME}/go/pkg/mod/github.com/zeebo/blake3@v0.2.1/"**; do
+# 		if [[ -d "${file}" ]]; then
+# 			continue
+# 		else
+# 			chmod -- 0444 "${file}"
+# 		fi
+# 	done
+# 	for file in "${HOME}/go/pkg/mod/github.com/zeebo/blake3@v0.2.1/"**; do
+# 		if [[ -d "${file}" ]]; then
+# 			chmod -- 0555 "${file}"
+# 		else
+# 			continue
+# 		fi
+# 	done
+# 	chmod -- 0555 "${HOME}/go/pkg/mod/github.com/zeebo/blake3@v0.2.1/"
+# fi
+# go="sys-cc95f250f6bc3b018920acb1f50bc5aa1f6bd725"
+# if [[ -d "${go}" ]]; then
+# 	if ! [[ -d "${HOME}/go/pkg/mod/golang.org/x/sys@v0.0.0-20201014080544-cc95f250f6bc" ]]; then
+# 		if mkdir -p -- "${HOME}/go/pkg/mod/golang.org/x/sys@v0.0.0-20201014080544-cc95f250f6bc"; then
+# 			mv -- "${go}/"* "${HOME}/go/pkg/mod/golang.org/x/sys@v0.0.0-20201014080544-cc95f250f6bc"
+# 		fi
+# 	fi
+# 	rm -fr -- "${go}"
+# 	for file in "${HOME}/go/pkg/mod/golang.org/x/sys@v0.0.0-20201014080544-cc95f250f6bc/"**; do
+# 		if [[ -d "${file}" ]]; then
+# 			continue
+# 		else
+# 			chmod -- 0444 "${file}"
+# 		fi
+# 	done
+# 	for file in "${HOME}/go/pkg/mod/golang.org/x/sys@v0.0.0-20201014080544-cc95f250f6bc/"**; do
+# 		if [[ -d "${file}" ]]; then
+# 			chmod -- 0555 "${file}"
+# 		else
+# 			continue
+# 		fi
+# 	done
+# 	chmod -- 0555 "${HOME}/go/pkg/mod/golang.org/x/sys@v0.0.0-20201014080544-cc95f250f6bc/"
+# fi
+}
+
+function build_perl() (
+local "lib"
+for lib in "${dir}/digest-"*/; do
+	lib="${lib/%"/"}"
+	if cd -- "${lib}"; then
+		if [[ -d "blib" ]]; then
+			continue
+		fi
+		if perl Makefile.PL 2>&1; then
+			if make 2>&1; then
+				if ! make test 2>&1; then
+					code=1
+					return 1
+				fi
+			else
+				code=1
+				return 1
+			fi
+		else
+			code=1
+			return 1
+		fi
+	else
+		code=1
+		return 1
+	fi
+done
+)
+
+function build_go() (
+local "ver"
+ver=$( go version 2>/dev/null )
+case "${ver}" in
+	"go version go1.15."*)
+		:
+	;;
+	"go version go1.1[0-4]."*|"go version go1.0[0-9]."*|"go version go0."*)
+		echo "build: ERROR: golang is below version 1.15"
+		code=1
+		return 1
+	;;
+	*)
+		echo "build: WARNING: golang is not version 1.15"
+	;;
+esac
+if [[ -d "${src}/blake3" ]]; then
+	echo
+	if [[ -e "${src}/blake3/blake3" ]]; then
+		return 0
+	fi
+	cd -- "${src}/blake3"
+	if ! go build 2>&1; then
+		rm -f -- "${src}/blake3/blake3"
+		echo "golang failed to build: blake3" 1>&2
+		code=1
+		return 1
+	fi
+fi
+)
+
+function build_c() {
+if [[ -d "${src}/crc32" ]]; then
+	echo
+	if [[ -e "${src}/crc32/crc32" ]]; then
+		return 0
+	fi
+	cd -- "${src}/crc32"
+	if make 2>&1; then
+		make clean
+	else
+		code=1
+		return 1
+	fi
+fi
+}
+
+pkgchk
+if download_libs; then
+	if ! build_perl; then
+		code=1
+	fi
+	if ! build_go; then
+		code=1
+	fi
+	build_c
+fi
+case "${code:-"0"}" in
+	0)
+		echo "build: final status: OK"
+	;;
+	1)
+		echo "build: final status: FAILED"
+	;;
+esac
+exit "${code:-"0"}"
+}
+

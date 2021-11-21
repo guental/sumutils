@@ -1,0 +1,120 @@
+#!/bin/bash
+{
+
+if ! type -- make &>/dev/null; then
+	echo "install: please install: coreutils build-essential" 1>&2
+	exit 1
+fi
+
+case "${UID:-"1000"}" in
+	0)
+		:
+	;;
+	*)
+		echo "install: please run as: root" 1>&2
+		exit 1	
+	;;
+esac
+
+function keyboard_interrupt() {
+exec 2>/dev/null
+printf -- '\n'
+exec >/dev/null
+exit 130
+}
+
+if [[ -d "${0%"/"*}" ]]; then
+	if cd -- "${0%"/"*}"; then
+		src="${PWD}/src/"
+		dir="${PWD}/lib/"
+	else
+		exit 1
+	fi
+else
+	src="${PWD}/src/"
+	dir="${PWD}/lib/"
+fi
+if ! [[ -d "${dir}" ]]; then
+	echo "${app}: please run: build" 1>&2
+	exit 1
+fi
+trap -- 'keyboard_interrupt' INT
+app="${0##*"/"}"
+code=0
+set +H -uo pipefail
+shopt -s -- extglob
+shopt -s -- globstar
+
+if [[ -d "${src}/bash-completion/completions" ]]; then
+	if [[ -d "/usr/share/bash-completion/completions/" ]]; then
+		if mkdir -p -- "/usr/local/share/bash-completion/completions/"; then
+			if cp -- "${src}/bash-completion/completions/"*"sum" "/usr/local/share/bash-completion/completions/"; then
+				echo "install: bash-completions are in: /usr/local/share/bash-completion/completions/"
+			else
+				code=1
+			fi
+		else
+			code=1
+		fi
+	fi
+fi
+if [[ -e "${src}/blake3/blake3" ]]; then
+	if cp -- "${src}/b3sum" "${src}/blake3/blake3" "/usr/local/bin/"; then
+		if chmod +x -- "/usr/local/bin/blake3"; then
+			echo "install: blake3 is in: /usr/local/bin/"
+		else
+			rm -- "/usr/local/bin/blake3"
+			code=1
+		fi
+	else
+		code=1
+	fi
+fi
+if [[ -e "${src}/crc32/crc32" ]]; then
+	if cp -- "${src}/crc32/crc32" "/usr/local/bin/"; then
+		if chmod +x -- "/usr/local/bin/crc32"; then
+			echo "install: crc32 is in: /usr/local/bin/"
+		else
+			rm -- "/usr/local/bin/crc32"
+			code=1
+		fi
+	else
+		code=1
+	fi
+fi
+for sum in "${src}/adler32" "${src}/"*"sum"; do
+	case "${sum##*"/"}" in
+		"b3sum")
+			continue
+		;;
+	esac
+	if cp -- "${sum}" "/usr/local/bin/"; then
+		if chmod +x -- "/usr/local/bin/${sum##*"/"}"; then
+			echo "install: ${sum##*"/"} is in: /usr/local/bin/"
+		else
+			rm -- "/usr/local/bin/${sum##*"/"}"
+			code=1
+		fi
+	else
+		code=1
+	fi
+done
+for perl in "${dir}digest-"*"-"*; do
+	if cd -- "${perl}"; then
+		if ! make install; then
+			code=1
+		fi
+	else
+		code=1
+	fi
+done
+case "${code:-"0"}" in
+	0)
+		echo "install: final status: OK"
+	;;
+	1)
+		echo "install: final status: FAILED"
+	;;
+esac
+exit "${code:-"0"}"
+}
