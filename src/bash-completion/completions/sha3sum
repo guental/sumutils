@@ -1,0 +1,27 @@
+_sha3sum_module()
+{
+	local cur prev OPTS
+	COMPREPLY=()
+	cur="${COMP_WORDS[COMP_CWORD]}"
+	prev="${COMP_WORDS[COMP_CWORD-1]}"
+	case $prev in
+		'-h'|'--help')
+			return 0
+			;;
+	esac
+	case $cur in
+		-*)
+			OPTS="
+				--help
+				--check
+				--tag
+				--ignore-missing
+			"
+			COMPREPLY=( $(compgen -W "${OPTS[*]}" -- $cur) )
+			return 0
+			;;
+	esac
+	_filedir
+	return 0
+}
+complete -F _sha3sum_module sha3sum
